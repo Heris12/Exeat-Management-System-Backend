@@ -37,9 +37,9 @@ async function seedAdmin() {
         const existingUser = await User.findOne({ email: normalizedEmail }).select("+password");
         if (existingUser) {
             if (existingUser.role === "admin") {
-                existingUser.fullName = fullName.trim() || "Admin";
+                existingUser.fullName = fullName.trim();
                 if (!(await existingUser.comparePassword(password))) {
-                    existingUser.password = password || "Admin123";
+                    existingUser.password = password;
                 }
                 await existingUser.save();
                 console.log("Admin credentials synchronized with environment settings");
@@ -49,15 +49,14 @@ async function seedAdmin() {
         }
 
         await User.create({
-            fullName: fullName.trim() || "Admin",
-            email: normalizedEmail || "admin@gmail.com",
-            password: password || "Admin123",
+            fullName: fullName.trim(),
+            email: normalizedEmail,
+            password: password,
             role: "admin"
         });
-
         console.log("Admin seeded successfully");
         console.log(`Admin Email: ${normalizedEmail}`);
-        console.log(`Admin Password: ${password}`);
+        console.log(`Admin Email: ${normalizedEmail}`);
     } finally {
         if (mongoose.connection.readyState !== 0) {
             await mongoose.disconnect();
