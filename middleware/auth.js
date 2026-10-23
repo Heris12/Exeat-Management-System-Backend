@@ -17,7 +17,7 @@ function getCookieToken(cookieHeader) {
     }
 }
 
-async function protect(req, res, next, onUnauthorized) {
+async function authenticate(req, res, next, onUnauthorized) {
     const reject = (status, message) => {
         if (onUnauthorized) {
             return onUnauthorized(status, message);
@@ -54,9 +54,13 @@ async function protect(req, res, next, onUnauthorized) {
     }
 }
 
+function protect(req, res, next) {
+    return authenticate(req, res, next);
+}
+
 function protectAdminPage(req, res, next) {
     const redirectToLogin = () => res.redirect(302, "/client/index.html?error=admin-access");
-    return protect(req, res, () => {
+    return authenticate(req, res, () => {
         if (req.user.role !== "admin") {
             return redirectToLogin();
         }
