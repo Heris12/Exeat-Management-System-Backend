@@ -17,14 +17,21 @@ function getCookieToken(cookieHeader) {
     }
 }
 
-async function protect(req, res, next) {
+async function protect(req, res, next, onUnauthorized) {
+    const reject = (status, message) => {
+        if (onUnauthorized) {
+            return onUnauthorized(status, message);
+        }
+        return res.status(status).json({ message });
+    };
+
     const authorization = req.headers.authorization || "";
     const bearerToken = authorization.startsWith("Bearer ")
         ? authorization.slice("Bearer ".length)
         : "";
     const token = bearerToken || getCookieToken(req.headers.cookie);
     if (!token) {
-        return res.status(401).json({ message: "Please log in to continue" });
+        return reject(401, "Please log in to continue");
     }
 
     try {
@@ -35,16 +42,26 @@ async function protect(req, res, next) {
         const payload = jwt.verify(token, secret);
         const user = await User.findById(payload.sub);
         if (!user) {
-            return res.status(401).json({ message: "Your account is no longer available" });
+            return reject(401, "Your account is no longer available");
         }
         req.user = user;
         return next();
     } catch (error) {
         if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
-            return res.status(401).json({ message: "Your session has expired. Please log in again" });
+            return reject(401, "Your session has expired. Please log in again");
         }
         return next(error);
     }
+}
+
+function protectAdminPage(req, res, next) {
+    const redirectToLogin = () => res.redirect(302, "/client/index.html?error=admin-access");
+    return protect(req, res, () => {
+        if (req.user.role !== "admin") {
+            return redirectToLogin();
+        }
+        return next();
+    }, redirectToLogin);
 }
 
 function requireAdmin(req, res, next) {
@@ -61,4 +78,4 @@ function requireStudent(req, res, next) {
     return next();
 }
 
-module.exports = { protect, requireAdmin, requireStudent };
+module.exports = { protect, protectAdminPage, requireAdmin, requireStudent };

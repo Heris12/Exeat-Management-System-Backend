@@ -7,7 +7,7 @@ function createToken(user) {
     if (!secret || secret.length < 32) {
         throw new Error("JWT_SECRET must be configured with at least 32 characters");
     }
-    return jwt.sign({ sub: user._id.toString() }, secret, { expiresIn: "7d" });
+    return jwt.sign({ sub: user._id.toString() }, secret, { expiresIn: "1h" });
 }
 
 function publicUser(user) {
@@ -26,7 +26,7 @@ function setAuthCookie(res, token) {
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     res.setHeader(
         "Set-Cookie",
-        `authToken=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`
+        `authToken=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600${secure}`
     );
 }
 
