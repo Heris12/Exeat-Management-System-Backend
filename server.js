@@ -2,21 +2,37 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const connectDB = require("./config/database");
-const { protect, requireAdmin } = require("./middleware/auth");
+const { protectAdminPage } = require("./middleware/auth");
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+const allowOrigin = [
+    "http://localhost:3000",
+    process.env.CLIENT_URL
+]
+
+app.use(cors({
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowOrigin.indexOf(origin) === -1 && !origin.endsWith(".vercel.app")) {
+            return callback(new Error("Not allowed by CORS"));
+        }
+        return callback(null, true);
+    },
+    credentials: true
+}
+))
 
 app.get("/", (req, res) => {
   res.json({ message: "API is running..." });
 });
 
 const clientPath = path.resolve(__dirname, "../client");
-const adminPagePath = path.join(clientPath, "html", "admin.html");
-const adminCreateUserPagePath = path.join(clientPath, "html", "admin-create-user.html");
+const adminPagePath = path.join(clientPath, "admin.html");
+const adminCreateUserPagePath = path.join(clientPath, "admin-create-user.html");
 
-app.get("/client/html/admin.html", protect, requireAdmin, (req, res) => {
+app.get("/client/admin.html", protectAdminPage, (req, res) => {
   res.set({
     "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow, noarchive"
@@ -24,7 +40,7 @@ app.get("/client/html/admin.html", protect, requireAdmin, (req, res) => {
   return res.sendFile(adminPagePath);
 });
 
-app.get("/client/html/admin-create-user.html", protect, requireAdmin, (req, res) => {
+app.get("/client/admin-create-user.html", protectAdminPage, (req, res) => {
   res.set({
     "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow, noarchive"
