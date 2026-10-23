@@ -1,5 +1,4 @@
 const jwt = require("jsonwebtoken");
-const mongoose = require("mongoose");
 const User = require("../models/user");
 
 function createToken(user) {
@@ -128,19 +127,9 @@ exports.getUsers = async (req, res) => {
 };
 
 // Get the currently logged-in user
-exports.getMe = async (req, res) => {
-    try {
-        const user = await User.findById(req.user._id).select("-password");
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-
-        return res.status(200).json({
-            success: true,
-            user: publicUser(user)
-        });
-    } catch (error) {
-        console.error("Could not load user:", error.message);
-        return res.status(500).json({ message: "Unable to fetch current user" });
-    }
+exports.getMe = (req, res) => {
+    return res.status(200).json({
+        success: true,
+        user: publicUser(req.user)
+    });
 };
