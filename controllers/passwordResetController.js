@@ -13,16 +13,14 @@ exports.forgotPassword = async (req, res) => {
         return res.status(400).json({ message: "Please enter a valid email address" });
     }
 
-    const {
-        SERVICE_ID,
-        TEMPLATE_ID,
-        PUBLIC_KEY,
-        PRIVATE_KEY,
-        CLIENT_URL
-    } = process.env;
+    const serviceId = process.env.EMAILJS_SERVICE_ID || process.env.SERVICE_ID;
+    const templateId = process.env.EMAILJS_TEMPLATE_ID || process.env.TEMPLATE_ID;
+    const publicKey = process.env.EMAILJS_PUBLIC_KEY || process.env.PUBLIC_KEY;
+    const privateKey = process.env.EMAILJS_PRIVATE_KEY || process.env.PRIVATE_KEY;
+    const { CLIENT_URL } = process.env;
     const clientUrl = CLIENT_URL?.split(",")[0]?.trim();
-    if (!SERVICE_ID || !TEMPLATE_ID || !PUBLIC_KEY || !PRIVATE_KEY || !clientUrl) {
-        console.error("Password reset email is not configured. Check SERVICE_ID, TEMPLATE_ID, PUBLIC_KEY, PRIVATE_KEY, and CLIENT_URL.");
+    if (!serviceId || !templateId || !publicKey || !privateKey || !clientUrl) {
+        console.error("Password reset email is not configured. Check EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY, and CLIENT_URL.");
         return res.status(503).json({ message: "Password reset email is temporarily unavailable. Please try again later." });
     }
 
@@ -52,16 +50,17 @@ exports.forgotPassword = async (req, res) => {
 
         resetUrl.searchParams.set("token", token);
         try {
-            await emailjs.send(SERVICE_ID, TEMPLATE_ID, {
+            await emailjs.send(serviceId, templateId, {
                 to_email: user.email,
                 email: user.email,
-                to_name: user.fullName,
+                user_name: user.fullName || "Student",
+                to_name: user.fullName || "Student",
                 name: user.fullName,
                 reset_link: resetUrl.toString(),
                 expires_in_minutes: RESET_TOKEN_TTL_MS / 60000
             }, {
-                publicKey: PUBLIC_KEY,
-                privateKey: PRIVATE_KEY
+                publicKey,
+                privateKey
             });
         } catch (error) {
             console.error("Could not send password reset email:", {
