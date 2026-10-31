@@ -8,7 +8,6 @@ function publicStudent(student) {
         fullName: student.fullName,
         matriculationNumber: student.matriculationNumber,
         department: student.department,
-        email: student.email,
         hostel: student.hostel
     };
 }
@@ -20,7 +19,7 @@ exports.getHostelData = async (req, res) => {
             User.find(query).sort({ fullName: 1 }),
             Exeat.find({ hostel: req.user.hostel })
                 .sort({ createdAt: -1 })
-                .populate("student", "fullName email matriculationNumber department hostel")
+                .populate("student", "fullName matriculationNumber department hostel")
                 .populate("reviewedBy", "fullName"),
             Exeat.countDocuments({ hostel: req.user.hostel, status: "pending" }),
             Exeat.countDocuments({ hostel: req.user.hostel, status: "approved" }),
@@ -71,7 +70,7 @@ exports.reviewHostelRequest = async (req, res) => {
         exeat.reviewedBy = req.user._id;
         exeat.reviewedAt = new Date();
         await exeat.save();
-        await exeat.populate("student", "fullName email matriculationNumber department hostel");
+        await exeat.populate("student", "fullName matriculationNumber department hostel");
 
         return res.status(200).json({
             message: `Exeat request ${status} successfully`,
