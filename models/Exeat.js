@@ -15,6 +15,11 @@ const exeatSchema = new mongoose.Schema({
         required: [true, "Destination is required"],
         trim: true,
     },
+    hostel: {
+        type: String,
+        enum: ["Hall 1", "Hall 2", "Hall 3", "Hall 4", "Hall 5", "Hall 6", "Hall 7", "Hall 8"],
+        required: [true, "Student hostel is required"],
+    },
     departureDate: {
         type: Date,
         required: [true, "Departure date is required"],
@@ -45,6 +50,24 @@ const exeatSchema = new mongoose.Schema({
         default: null
     },
     reviewedAt: {
+        type: Date,
+        default: null
+    },
+    departureConfirmedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null
+    },
+    departureConfirmedAt: {
+        type: Date,
+        default: null
+    },
+    returnConfirmedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null
+    },
+    returnConfirmedAt: {
         type: Date,
         default: null
     },

@@ -9,6 +9,7 @@ function publicUser(user) {
         matriculationNumber: user.matriculationNumber,
         department: user.department,
         email: user.email,
+        hostel: user.hostel,
         role: user.role,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
@@ -19,7 +20,7 @@ function isObjectBody(body) {
     return body !== null && typeof body === "object" && !Array.isArray(body);
 }
 
-function sendError(res, error, action) {
+function sendError(res, error, action, role) {
     if (error.code === 11000) {
         const field = Object.keys(error.keyPattern || error.keyValue || {})[0];
         const messages = {
@@ -27,6 +28,11 @@ function sendError(res, error, action) {
             matriculationNumber: "This matriculation number is already registered",
             fullName: "An account with this full name already exists"
         };
+        if (role === "portal" && field === "matriculationNumber") {
+            return res.status(409).json({
+                message: "A hostel warden portal account already exists"
+            });
+        }
         return res.status(409).json({
             message: messages[field] || "A record with these details already exists"
         });
@@ -50,32 +56,41 @@ function getValidId(req, res) {
 }
 
 async function populateExeat(exeat) {
-    await exeat.populate("student", "fullName email matriculationNumber department");
+    await exeat.populate("student", "fullName email matriculationNumber department hostel");
     await exeat.populate("reviewedBy", "fullName email");
     return exeat;
 }
 
 exports.createUser = async (req, res) => {
+    let role;
     try {
         const body = req.body;
         if (!isObjectBody(body)) {
             return res.status(400).json({ message: "A user object is required" });
         }
 
-        const role = body.role || "student";
-        if (!["student", "admin"].includes(role)) {
+        role = body.role || "student";
+        if (!["student", "portal", "admin", "security"].includes(role)) {
             return res.status(400).json({ message: "Invalid role value" });
         }
 
         const matriculationNumber = body.matriculationNumber ?? body.matricNumber;
         const requiredFields = [body.fullName, body.email, body.password];
-        if (role === "student") requiredFields.push(matriculationNumber, body.department);
+        if (role === "student") requiredFields.push(matriculationNumber, body.department, body.hostel);
+        if (role === "portal") requiredFields.push(body.hostel);
         if (!requiredFields.every((value) => typeof value === "string" && value.trim())) {
             return res.status(400).json({
                 message: role === "admin"
                     ? "Full name, email, and password are required"
-                    : "Full name, matriculation number, department, email, and password are required"
+                    : role === "portal"
+                        ? "Full name, email, password, and hostel are required"
+                        : role === "security"
+                            ? "Full name, email, and password are required"
+                            : "Full name, matriculation number, department, email, password, and hostel are required"
             });
+        }
+        if (["student", "portal"].includes(role) && !/^Hall [1-8]$/.test(body.hostel)) {
+            return res.status(400).json({ message: "Select a valid hostel hall" });
         }
 
         const user = await User.create({
@@ -84,14 +99,15 @@ exports.createUser = async (req, res) => {
             password: body.password,
             role,
             ...(matriculationNumber ? { matriculationNumber: matriculationNumber.trim() } : {}),
-            ...(body.department ? { department: body.department.trim() } : {})
+            ...(body.department ? { department: body.department.trim() } : {}),
+            ...(body.hostel ? { hostel: body.hostel } : {})
         });
         return res.status(201).json({
             message: "User created successfully",
             user: publicUser(user)
         });
     } catch (error) {
-        return sendError(res, error, "create user");
+        return sendError(res, error, "create user", role);
     }
 };
 
@@ -130,7 +146,7 @@ exports.updateUser = async (req, res) => {
         }
 
         const updates = {};
-        for (const field of ["fullName", "department", "email", "password", "role"]) {
+        for (const field of ["fullName", "department", "email", "password", "role", "hostel"]) {
             if (Object.prototype.hasOwnProperty.call(body, field)) {
                 updates[field] = body[field];
             }
@@ -142,8 +158,11 @@ exports.updateUser = async (req, res) => {
         if (Object.keys(updates).length === 0) {
             return res.status(400).json({ message: "No supported user fields were provided" });
         }
-        if (updates.role !== undefined && !["student", "admin"].includes(updates.role)) {
+        if (updates.role !== undefined && !["student", "portal", "admin", "security"].includes(updates.role)) {
             return res.status(400).json({ message: "Invalid role value" });
+        }
+        if (updates.hostel !== undefined && updates.hostel !== "" && !/^Hall [1-8]$/.test(updates.hostel)) {
+            return res.status(400).json({ message: "Select a valid hostel hall" });
         }
         if (typeof updates.email === "string") {
             updates.email = updates.email.trim().toLowerCase();
@@ -157,6 +176,20 @@ exports.updateUser = async (req, res) => {
         const user = await User.findById(id);
         if (!user) {
             return res.status(404).json({ message: "User not found" });
+        }
+        const resultingRole = updates.role || user.role;
+        if (resultingRole === "portal" && !(updates.hostel || user.hostel)) {
+            return res.status(400).json({ message: "Assign a hostel hall to the warden" });
+        }
+        if (
+            resultingRole === "student" &&
+            (updates.hostel !== undefined || updates.role === "student") &&
+            !/^Hall [1-8]$/.test(updates.hostel || user.hostel || "")
+        ) {
+            return res.status(400).json({ message: "Assign a valid hostel hall to the student" });
+        }
+        if (["admin", "security"].includes(resultingRole)) {
+            updates.hostel = undefined;
         }
         Object.assign(user, updates);
         await user.save();
@@ -215,6 +248,7 @@ exports.createExeat = async (req, res) => {
             student: student._id,
             exeatType: body.exeatType,
             destination: body.destination,
+            hostel: body.hostel,
             departureDate,
             returnDate,
             reason: body.reason,
@@ -238,7 +272,7 @@ exports.getExeats = async (req, res) => {
     try {
         const exeats = await Exeat.find()
             .sort({ createdAt: -1 })
-            .populate("student", "fullName email matriculationNumber department")
+            .populate("student", "fullName email matriculationNumber department hostel")
             .populate("reviewedBy", "fullName email");
         return res.status(200).json({ exeats });
     } catch (error) {
@@ -280,6 +314,7 @@ exports.updateExeat = async (req, res) => {
         const fields = [
             "exeatType",
             "destination",
+            "hostel",
             "departureDate",
             "returnDate",
             "reason",
@@ -323,6 +358,12 @@ exports.updateExeat = async (req, res) => {
         if (Object.prototype.hasOwnProperty.call(body, "status")) {
             exeat.reviewedBy = body.status === "pending" ? null : req.user?._id;
             exeat.reviewedAt = body.status === "pending" ? null : new Date();
+            if (body.status !== "approved") {
+                exeat.departureConfirmedBy = null;
+                exeat.departureConfirmedAt = null;
+                exeat.returnConfirmedBy = null;
+                exeat.returnConfirmedAt = null;
+            }
         }
 
         await exeat.save();
@@ -365,8 +406,10 @@ exports.deleteAllExeats = async (req, res) => {
 
 exports.stats = async (req, res) => {
     try {
-        const [students, totalRequests, pending, approved, rejected] = await Promise.all([
+        const [students, wardens, security, totalRequests, pending, approved, rejected] = await Promise.all([
             User.countDocuments({ role: "student" }),
+            User.countDocuments({ role: "portal" }),
+            User.countDocuments({ role: "security" }),
             Exeat.countDocuments(),
             Exeat.countDocuments({ status: "pending" }),
             Exeat.countDocuments({ status: "approved" }),
@@ -374,7 +417,7 @@ exports.stats = async (req, res) => {
         ]);
 
         return res.status(200).json({
-            stats: { students, totalRequests, pending, approved, rejected }
+            stats: { students, wardens, security, totalRequests, pending, approved, rejected }
         });
     } catch (error) {
         return sendError(res, error, "fetch admin statistics");

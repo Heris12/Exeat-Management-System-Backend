@@ -16,6 +16,7 @@ function publicUser(user) {
         matricNumber: user.matriculationNumber,
         department: user.department,
         email: user.email,
+        hostel: user.hostel,
         role: user.role,
         createdAt: user.createdAt
     };
@@ -38,73 +39,44 @@ exports.logout = (req, res) => {
     return res.status(200).json({ message: "Logged out successfully" });
 };
 
-// Register a new user
-exports.register = async (req, res) => {
-    try {
-        const {
-            fullName,
-            matricNumber,
-            matriculationNumber,
-            department,
-            email,
-            password
-        } = req.body ?? {};
-        const studentNumber = matricNumber ?? matriculationNumber;
-        if (![fullName, studentNumber, department, email, password].every(
-            (value) => typeof value === "string" && value.trim()
-        )) {
-            return res.status(400).json({ message: "All fields are required" });
-        }
-        if (password.length < 6) {
-            return res.status(400).json({ message: "Password must be at least 6 characters" });
-        }
-
-        const user = await User.create({
-            fullName: fullName.trim(),
-            matriculationNumber: studentNumber.trim(),
-            department: department.trim(),
-            email: email.trim().toLowerCase(),
-            password
-        });
-        return res.status(201).json({
-            message: "Account created successfully",
-            user: publicUser(user)
-        });
-    } catch (error) {
-        if (error.code === 11000) {
-            const field = Object.keys(error.keyPattern || error.keyValue || {})[0];
-            const messages = {
-                email: "An account with this email already exists",
-                matriculationNumber: "This matriculation number is already registered",
-                fullName: "An account with this full name already exists"
-            };
-            const message = messages[field] || "An account with these details already exists";
-            return res.status(409).json({ message });
-        }
-        if (error.name === "ValidationError") {
-            return res.status(400).json({ message: error.message });
-        }
-        console.error("Registration failed:", error.message);
-        return res.status(500).json({ message: "Could not create the account" });
-    }
-};
-
 // Login an existing user
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body ?? {};
+        const { identifier, email, password } = req.body ?? {};
+        const loginIdentifier = typeof identifier === "string"
+            ? identifier.trim()
+            : typeof email === "string"
+                ? email.trim()
+                : "";
         if (
-            typeof email !== "string" ||
+            typeof loginIdentifier !== "string" ||
             typeof password !== "string" ||
-            !email.trim() ||
+            !loginIdentifier ||
             !password
         ) {
-            return res.status(400).json({ message: "Email and password are required" });
+            return res.status(400).json({ message: "Staff email or student matric number and password are required" });
         }
 
-        const user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password");
+        const isEmail = /^\S+@\S+\.\S+$/.test(loginIdentifier);
+        const query = isEmail
+            ? { role: { $in: ["admin", "portal", "warden", "security"] }, email: loginIdentifier.toLowerCase() }
+            : {
+                role: "student",
+                matriculationNumber: new RegExp(
+                    `^${loginIdentifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+                    "i"
+                )
+            };
+        const user = await User.findOne(query).select("+password");
         if (!user || !(await user.comparePassword(password))) {
             return res.status(401).json({ message: "Invalid email or password" });
+        }
+        if (user.role === "warden") {
+            await User.updateOne(
+                { _id: user._id, role: "warden" },
+                { $set: { role: "portal" } }
+            );
+            user.role = "portal";
         }
         const token = createToken(user);
         setAuthCookie(res, token);
