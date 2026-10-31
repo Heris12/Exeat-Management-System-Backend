@@ -68,9 +68,43 @@ function protectAdminPage(req, res, next) {
     }, redirectToLogin);
 }
 
+function protectWardenPage(req, res, next) {
+    const redirectToLogin = () => res.redirect(302, "/client/index.html?error=admin-access");
+    return authenticate(req, res, () => {
+        if (req.user.role !== "portal") {
+            return redirectToLogin();
+        }
+        return next();
+    }, redirectToLogin);
+}
+
+function protectSecurityPage(req, res, next) {
+    const redirectToLogin = () => res.redirect(302, "/client/index.html?error=admin-access");
+    return authenticate(req, res, () => {
+        if (req.user.role !== "security") {
+            return redirectToLogin();
+        }
+        return next();
+    }, redirectToLogin);
+}
+
 function requireAdmin(req, res, next) {
     if (!req.user || req.user.role !== "admin") {
         return res.status(403).json({ message: "Administrator access is required" });
+    }
+    return next();
+}
+
+function requireWarden(req, res, next) {
+    if (!req.user || req.user.role !== "portal" || !req.user.hostel) {
+        return res.status(403).json({ message: "Hostel warden access is required" });
+    }
+    return next();
+}
+
+function requireSecurity(req, res, next) {
+    if (!req.user || req.user.role !== "security") {
+        return res.status(403).json({ message: "School security access is required" });
     }
     return next();
 }
@@ -82,4 +116,13 @@ function requireStudent(req, res, next) {
     return next();
 }
 
-module.exports = { protect, protectAdminPage, requireAdmin, requireStudent };
+module.exports = {
+    protect,
+    protectAdminPage,
+    protectWardenPage,
+    protectSecurityPage,
+    requireAdmin,
+    requireWarden,
+    requireSecurity,
+    requireStudent
+};

@@ -22,6 +22,12 @@ exports.createExeat = async (req, res) => {
         if (!exeatType || !destination || !departureDate || !returnDate || !reason) {
             return res.status(400).json({ message: "All fields are required" });
         }
+        if (!req.user.hostel) {
+            return res.status(403).json({ message: "Your account does not have a hostel assigned. Contact the main administrator." });
+        }
+        if (!/^Hall [1-8]$/.test(req.user.hostel)) {
+            return res.status(400).json({ message: "Your account does not have a valid hostel hall assigned. Contact the main administrator." });
+        }
         const departure = new Date(departureDate);
         const returnD = new Date(returnDate);
         if (Number.isNaN(departure.getTime()) || Number.isNaN(returnD.getTime())) {
@@ -34,6 +40,7 @@ exports.createExeat = async (req, res) => {
             student: req.user._id,
             exeatType,
             destination: destination.trim(),
+            hostel: req.user.hostel,
             departureDate: departure,
             returnDate: returnD,
             reason: reason.trim()
@@ -51,7 +58,7 @@ exports.getExeatById = async (req, res) => {
         const exeat = await Exeat.findById(req.params.id)
             .populate("student", "fullName email matriculationNumber department")
             .populate("reviewedBy", "fullName email");
-        if (!exeat) {
+        if (!exeat || !exeat.student) {
             return res.status(404).json({ message: "Exeat not found" });
         }
         if (req.user.role !== "admin" && String(exeat.student._id) !== String(req.user._id)) {
@@ -60,6 +67,95 @@ exports.getExeatById = async (req, res) => {
         res.status(200).json(exeat);
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+};
+
+exports.downloadExeatSlip = async (req, res) => {
+    try {
+        if (!mongoose.isValidObjectId(req.params.id)) {
+            return res.status(400).json({ message: "Invalid request ID." });
+        }
+
+        const exeat = await Exeat.findById(req.params.id)
+            .populate("student", "fullName matriculationNumber department")
+            .populate("reviewedBy", "fullName");
+        if (!exeat || !exeat.student) {
+            return res.status(404).json({ message: "Exeat not found" });
+        }
+        if (String(exeat.student._id) !== String(req.user._id)) {
+            return res.status(403).json({ message: "You are not allowed to download this exeat slip" });
+        }
+        if (exeat.status !== "approved") {
+            return res.status(409).json({ message: "An exeat slip is available only after approval" });
+        }
+
+        const PDFDocument = require("pdfkit");
+        const document = new PDFDocument({ size: "A4", margin: 56 });
+        const filename = `exeat-slip-${exeat._id}.pdf`;
+        res.set({
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+            "Cache-Control": "no-store"
+        });
+        document.on("error", (error) => {
+            console.error("Could not generate exeat slip:", error);
+            if (res.headersSent) {
+                res.destroy();
+            } else {
+                res.status(500).json({ message: "An error occurred while generating the exeat slip" });
+            }
+        });
+        document.pipe(res);
+
+        const formattedDate = (date) => new Date(date).toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "long",
+            year: "numeric",
+            timeZone: "UTC"
+        });
+        const writeField = (label, value) => {
+            document.font("Helvetica-Bold").fillColor("#1f2937").text(`${label}: `, { continued: true });
+            document.font("Helvetica").fillColor("#374151").text(String(value || "—"));
+            document.moveDown(0.7);
+        };
+
+        document.fillColor("#0057b8").font("Helvetica-Bold").fontSize(22).text("APPROVED EXEAT SLIP", {
+            align: "center"
+        });
+        document.moveDown(0.5);
+        document.fillColor("#4b5563").font("Helvetica").fontSize(10).text("Edo State University", {
+            align: "center"
+        });
+        document.moveDown(2);
+        document.fontSize(12);
+        writeField("Student", exeat.student.fullName);
+        writeField("Matriculation number", exeat.student.matriculationNumber);
+        writeField("Department", exeat.student.department);
+        writeField("Exeat type", exeat.exeatType);
+        writeField("Destination", exeat.destination);
+        writeField("Hostel", exeat.hostel);
+        writeField("Departure date", formattedDate(exeat.departureDate));
+        writeField("Return date", formattedDate(exeat.returnDate));
+        writeField("Reason", exeat.reason);
+        writeField("Status", "Approved");
+        writeField("Approved on", exeat.reviewedAt ? formattedDate(exeat.reviewedAt) : "—");
+        writeField("Approved by", exeat.reviewedBy?.fullName);
+        if (exeat.adminComment) {
+            writeField("Administrator comment", exeat.adminComment);
+        }
+        document.moveDown(2);
+        document.fontSize(9).fillColor("#6b7280").text(
+            "Please present this approved slip to the appropriate university personnel when required.",
+            { align: "center" }
+        );
+        document.end();
+    } catch (error) {
+        console.error("Could not download exeat slip:", error);
+        if (res.headersSent) {
+            res.destroy();
+            return;
+        }
+        return res.status(500).json({ message: "An error occurred while generating the exeat slip" });
     }
 };
 

@@ -38,9 +38,34 @@ const userSchema = new mongoose.Schema({
         minlength: [6, "Password must be at least 6 characters long"],
         select: false, // Exclude password from query results by default
     },
+    passwordResetToken: {
+        type: String,
+        select: false,
+    },
+    passwordResetExpires: {
+        type: Date,
+        select: false,
+    },
+    resetPasswordToken: {
+        type: String,
+        default: null,
+        select: false,
+    },
+    resetPasswordExpires: {
+        type: Date,
+        default: null,
+        select: false,
+    },
+    hostel: {
+        type: String,
+        enum: ["Hall 1", "Hall 2", "Hall 3", "Hall 4", "Hall 5", "Hall 6", "Hall 7", "Hall 8"],
+        required: function () {
+            return this.role === "portal";
+        },
+    },
     role: {
         type: String,
-        enum: ["student", "admin"],
+        enum: ["student", "portal", "admin", "security"],
         default: "student",
     },
 }, {timestamps: true});
