@@ -68,7 +68,7 @@ function getValidId(req, res) {
 }
 
 async function populateExeat(exeat) {
-    await exeat.populate("student", "fullName email matriculationNumber department hostel");
+    await exeat.populate("student", "fullName email matriculationNumber department faculty level phoneNumber hostel");
     await exeat.populate("reviewedBy", "fullName email");
     return exeat;
 }
@@ -100,7 +100,7 @@ exports.createUser = async (req, res) => {
                         ? "Full name, email, password, and hostel are required"
                         : role === "security"
                             ? "Full name, email, and password are required"
-                            : "Full name, matriculation number, department, faculty, email, password, and hostel are required"
+                            : "Full name, matriculation number, department, faculty, hostel, email, and password are required"
             });
         }
         if (role === "student" && !faculties.includes(body.faculty.trim())) {
@@ -120,7 +120,7 @@ exports.createUser = async (req, res) => {
             ...(body.faculty ? { faculty: body.faculty.trim() } : {}),
             ...(body.level ? { level: body.level.trim() } : {}),
             ...(body.phoneNumber ? { phoneNumber: body.phoneNumber.trim() } : {}),
-            ...(body.hostel ? { hostel: body.hostel } : {})
+            ...(["student", "portal"].includes(role) ? { hostel: body.hostel } : {})
         });
         return res.status(201).json({
             message: "User created successfully",
@@ -259,6 +259,10 @@ exports.createExeat = async (req, res) => {
         if (!student) {
             return res.status(404).json({ message: "Student not found" });
         }
+        const hostel = body.hostel || student.hostel;
+        if (!/^Hall [1-8]$/.test(hostel || "")) {
+            return res.status(400).json({ message: "A valid hostel hall is required" });
+        }
         if (body.status !== undefined && !["pending", "approved", "rejected"].includes(body.status)) {
             return res.status(400).json({ message: "Invalid status value" });
         }
@@ -282,7 +286,9 @@ exports.createExeat = async (req, res) => {
             student: student._id,
             exeatType: body.exeatType,
             destination: body.destination,
-            hostel: body.hostel,
+            hostel,
+            level: body.level || student.level,
+            phoneNumber: body.phoneNumber || student.phoneNumber,
             departureDate,
             departureTime,
             returnDate,
@@ -314,7 +320,7 @@ exports.getExeats = async (req, res) => {
     try {
         const exeats = await Exeat.find()
             .sort({ createdAt: -1 })
-            .populate("student", "fullName email matriculationNumber department hostel")
+            .populate("student", "fullName email matriculationNumber department faculty hostel level phoneNumber")
             .populate("reviewedBy", "fullName email");
         return res.status(200).json({ exeats });
     } catch (error) {

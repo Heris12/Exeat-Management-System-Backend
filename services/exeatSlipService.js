@@ -7,7 +7,7 @@ const emailjs = require("@emailjs/nodejs");
 const Exeat = require("../models/Exeat");
 
 const PAGE_MARGIN = 42;
-const SLIP_VERSION = 5;
+const SLIP_VERSION = 6;
 
 function formatDate(value) {
     if (!value) return "Not provided";
@@ -153,9 +153,9 @@ async function createPdf(exeat, token) {
         ["Matriculation number", student.matriculationNumber],
         ["Department", student.department],
         ["Faculty", student.faculty],
-        ["Level", student.level],
+        ["Level", exeat.level || student.level],
         ["Hostel", exeat.hostel || student.hostel],
-        ["Phone number", student.phoneNumber],
+        ["Phone number", exeat.phoneNumber || student.phoneNumber],
         ["Email", student.email]
     ].forEach(([label, value], index) => {
         const row = Math.floor(index / 3);
