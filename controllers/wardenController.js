@@ -15,17 +15,24 @@ function publicStudent(student) {
 
 exports.getHostelData = async (req, res) => {
     try {
-        const query = { role: "student", hostel: req.user.hostel };
-        const [students, requests, pendingRequests, approvedRequests, rejectedRequests] = await Promise.all([
-            User.find(query).sort({ fullName: 1 }),
-            Exeat.find({ hostel: req.user.hostel })
+        const requestFilter = { hostel: req.user.hostel };
+        const [studentIds, requests, pendingRequests, approvedRequests, rejectedRequests] = await Promise.all([
+            Exeat.distinct("student", requestFilter),
+            Exeat.find(requestFilter)
                 .sort({ createdAt: -1 })
                 .populate("student", "fullName matriculationNumber department hostel")
                 .populate("reviewedBy", "fullName"),
-            Exeat.countDocuments({ hostel: req.user.hostel, status: "pending" }),
-            Exeat.countDocuments({ hostel: req.user.hostel, status: "approved" }),
-            Exeat.countDocuments({ hostel: req.user.hostel, status: "rejected" })
+            Exeat.countDocuments({ ...requestFilter, status: "pending" }),
+            Exeat.countDocuments({ ...requestFilter, status: "approved" }),
+            Exeat.countDocuments({ ...requestFilter, status: "rejected" })
         ]);
+        const students = await User.find({
+            role: "student",
+            $or: [
+                { hostel: req.user.hostel },
+                { _id: { $in: studentIds } }
+            ]
+        }).sort({ fullName: 1 });
 
         return res.status(200).json({
             hostel: req.user.hostel,
@@ -36,7 +43,10 @@ exports.getHostelData = async (req, res) => {
                 approvedRequests,
                 rejectedRequests
             },
-            students: students.map(publicStudent),
+            students: students.map((student) => ({
+                ...publicStudent(student),
+                hostel: student.hostel || req.user.hostel
+            })),
             requests
         });
     } catch (error) {

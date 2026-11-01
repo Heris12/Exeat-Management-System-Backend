@@ -20,6 +20,16 @@ const exeatSchema = new mongoose.Schema({
         enum: ["Hall 1", "Hall 2", "Hall 3", "Hall 4", "Hall 5", "Hall 6", "Hall 7", "Hall 8"],
         required: [true, "Student hostel is required"],
     },
+    level: {
+        type: String,
+        trim: true,
+        maxlength: 30
+    },
+    phoneNumber: {
+        type: String,
+        trim: true,
+        maxlength: 30
+    },
     departureDate: {
         type: Date,
         required: [true, "Departure date is required"],

@@ -25,15 +25,28 @@ exports.getAllExeat = exports.getAllExeats;
 // Create a new exeat request
 exports.createExeat = async (req, res) => {
     try {
-        const { exeatType, destination, departureDate, returnDate, reason } = req.body;
-        if (!exeatType || !destination || !departureDate || !returnDate || !reason) {
+        const { exeatType, destination, level, phoneNumber, departureDate, returnDate, reason } = req.body;
+        if (
+            !exeatType ||
+            typeof destination !== "string" ||
+            !destination.trim() ||
+            typeof level !== "string" ||
+            !level.trim() ||
+            level.trim().length > 30 ||
+            typeof phoneNumber !== "string" ||
+            !phoneNumber.trim() ||
+            phoneNumber.trim().length > 30 ||
+            !departureDate ||
+            !returnDate ||
+            typeof reason !== "string" ||
+            !reason.trim()
+        ) {
             return res.status(400).json({ message: "All fields are required" });
         }
-        if (!req.user.hostel) {
-            return res.status(403).json({ message: "Your account does not have a hostel assigned. Contact the main administrator." });
-        }
-        if (!/^Hall [1-8]$/.test(req.user.hostel)) {
-            return res.status(400).json({ message: "Your account does not have a valid hostel hall assigned. Contact the main administrator." });
+        if (!/^Hall [1-8]$/.test(req.user.hostel || "")) {
+            return res.status(400).json({
+                message: "Your account does not have a valid hostel hall assigned. Contact the administrator."
+            });
         }
         const departure = new Date(departureDate);
         const returnD = new Date(returnDate);
@@ -53,6 +66,8 @@ exports.createExeat = async (req, res) => {
             exeatType,
             destination: destination.trim(),
             hostel: req.user.hostel,
+            level: level.trim(),
+            phoneNumber: phoneNumber.trim(),
             departureDate: departure,
             departureTime,
             returnDate: returnD,
