@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Exeat = require("../models/Exeat");
 const User = require("../models/user");
+const { issueApprovedSlip } = require("../services/exeatSlipService");
 
 function publicStudent(student) {
     return {
@@ -71,9 +72,15 @@ exports.reviewHostelRequest = async (req, res) => {
         exeat.reviewedAt = new Date();
         await exeat.save();
         await exeat.populate("student", "fullName matriculationNumber department hostel");
+        const permissionSlip = status === "approved"
+            ? await issueApprovedSlip(exeat)
+            : null;
 
         return res.status(200).json({
-            message: `Exeat request ${status} successfully`,
+            message: permissionSlip && !permissionSlip.emailSent
+                ? "Exeat request approved and permission slip generated, but email delivery failed."
+                : `Exeat request ${status} successfully`,
+            ...(permissionSlip ? { permissionSlip } : {}),
             exeat
         });
     } catch (error) {

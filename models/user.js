@@ -24,6 +24,21 @@ const userSchema = new mongoose.Schema({
         },
         trim: true,
     },
+    faculty: {
+        type: String,
+        trim: true,
+        maxlength: 120
+    },
+    level: {
+        type: String,
+        trim: true,
+        maxlength: 30
+    },
+    phoneNumber: {
+        type: String,
+        trim: true,
+        maxlength: 30
+    },
     email: {
         type: String,
         required: [true, "Email is required"],

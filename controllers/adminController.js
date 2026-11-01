@@ -1,6 +1,15 @@
 const mongoose = require("mongoose");
 const User = require("../models/user");
 const Exeat = require("../models/Exeat");
+const { issueApprovedSlip } = require("../services/exeatSlipService");
+
+const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+const faculties = [
+    "Faculty of Science",
+    "Faculty of Arts",
+    "Faculty of Engineering",
+    "Faculty of Law"
+];
 
 function publicUser(user) {
     return {
@@ -8,6 +17,9 @@ function publicUser(user) {
         fullName: user.fullName,
         matriculationNumber: user.matriculationNumber,
         department: user.department,
+        faculty: user.faculty,
+        level: user.level,
+        phoneNumber: user.phoneNumber,
         email: user.email,
         hostel: user.hostel,
         role: user.role,
@@ -76,7 +88,9 @@ exports.createUser = async (req, res) => {
 
         const matriculationNumber = body.matriculationNumber ?? body.matricNumber;
         const requiredFields = [body.fullName, body.email, body.password];
-        if (role === "student") requiredFields.push(matriculationNumber, body.department, body.hostel);
+        if (role === "student") {
+            requiredFields.push(matriculationNumber, body.department, body.faculty, body.hostel);
+        }
         if (role === "portal") requiredFields.push(body.hostel);
         if (!requiredFields.every((value) => typeof value === "string" && value.trim())) {
             return res.status(400).json({
@@ -86,8 +100,11 @@ exports.createUser = async (req, res) => {
                         ? "Full name, email, password, and hostel are required"
                         : role === "security"
                             ? "Full name, email, and password are required"
-                            : "Full name, matriculation number, department, email, password, and hostel are required"
+                            : "Full name, matriculation number, department, faculty, email, password, and hostel are required"
             });
+        }
+        if (role === "student" && !faculties.includes(body.faculty.trim())) {
+            return res.status(400).json({ message: "Select a valid faculty" });
         }
         if (["student", "portal"].includes(role) && !/^Hall [1-8]$/.test(body.hostel)) {
             return res.status(400).json({ message: "Select a valid hostel hall" });
@@ -100,6 +117,9 @@ exports.createUser = async (req, res) => {
             role,
             ...(matriculationNumber ? { matriculationNumber: matriculationNumber.trim() } : {}),
             ...(body.department ? { department: body.department.trim() } : {}),
+            ...(body.faculty ? { faculty: body.faculty.trim() } : {}),
+            ...(body.level ? { level: body.level.trim() } : {}),
+            ...(body.phoneNumber ? { phoneNumber: body.phoneNumber.trim() } : {}),
             ...(body.hostel ? { hostel: body.hostel } : {})
         });
         return res.status(201).json({
@@ -146,7 +166,7 @@ exports.updateUser = async (req, res) => {
         }
 
         const updates = {};
-        for (const field of ["fullName", "department", "email", "password", "role", "hostel"]) {
+        for (const field of ["fullName", "department", "faculty", "level", "phoneNumber", "email", "password", "role", "hostel"]) {
             if (Object.prototype.hasOwnProperty.call(body, field)) {
                 updates[field] = body[field];
             }
@@ -164,6 +184,12 @@ exports.updateUser = async (req, res) => {
         if (updates.hostel !== undefined && updates.hostel !== "" && !/^Hall [1-8]$/.test(updates.hostel)) {
             return res.status(400).json({ message: "Select a valid hostel hall" });
         }
+        if (
+            updates.faculty !== undefined &&
+            (typeof updates.faculty !== "string" || !faculties.includes(updates.faculty.trim()))
+        ) {
+            return res.status(400).json({ message: "Select a valid faculty" });
+        }
         if (typeof updates.email === "string") {
             updates.email = updates.email.trim().toLowerCase();
         }
@@ -172,6 +198,9 @@ exports.updateUser = async (req, res) => {
             updates.matriculationNumber = updates.matriculationNumber.trim();
         }
         if (typeof updates.department === "string") updates.department = updates.department.trim();
+        if (typeof updates.faculty === "string") updates.faculty = updates.faculty.trim();
+        if (typeof updates.level === "string") updates.level = updates.level.trim();
+        if (typeof updates.phoneNumber === "string") updates.phoneNumber = updates.phoneNumber.trim();
 
         const user = await User.findById(id);
         if (!user) {
@@ -236,8 +265,13 @@ exports.createExeat = async (req, res) => {
 
         const departureDate = new Date(body.departureDate);
         const returnDate = new Date(body.returnDate);
+        const departureTime = body.departureTime || "08:00";
+        const returnTime = body.returnTime || "18:00";
         if (Number.isNaN(departureDate.getTime()) || Number.isNaN(returnDate.getTime())) {
             return res.status(400).json({ message: "Valid departure and return dates are required" });
+        }
+        if (!timePattern.test(departureTime) || !timePattern.test(returnTime)) {
+            return res.status(400).json({ message: "Departure and return times must use HH:MM format" });
         }
         if (departureDate >= returnDate) {
             return res.status(400).json({ message: "Return date must be after departure date" });
@@ -250,7 +284,9 @@ exports.createExeat = async (req, res) => {
             destination: body.destination,
             hostel: body.hostel,
             departureDate,
+            departureTime,
             returnDate,
+            returnTime,
             reason: body.reason,
             status,
             adminComment: body.adminComment,
@@ -258,9 +294,15 @@ exports.createExeat = async (req, res) => {
                 ? { reviewedBy: req.user?._id, reviewedAt: new Date() }
                 : {})
         });
+        const permissionSlip = status === "approved"
+            ? await issueApprovedSlip(exeat)
+            : null;
         await populateExeat(exeat);
         return res.status(201).json({
-            message: "Exeat created successfully",
+            message: permissionSlip && !permissionSlip.emailSent
+                ? "Exeat created and permission slip generated, but email delivery failed."
+                : "Exeat created successfully",
+            ...(permissionSlip ? { permissionSlip } : {}),
             exeat
         });
     } catch (error) {
@@ -311,12 +353,27 @@ exports.updateExeat = async (req, res) => {
             return res.status(404).json({ message: "Exeat not found" });
         }
 
+        if (exeat.status !== "pending") {
+            if (body.status === "approved" && exeat.status === "approved") {
+                const permissionSlip = await issueApprovedSlip(exeat);
+                return res.status(200).json({
+                    message: permissionSlip.emailSent
+                        ? "This exeat was already approved and its permission slip is available."
+                        : "This exeat was already approved; email delivery is still unavailable.",
+                    permissionSlip
+                });
+            }
+            return res.status(409).json({ message: "This exeat request has already been reviewed" });
+        }
+
         const fields = [
             "exeatType",
             "destination",
             "hostel",
             "departureDate",
+            "departureTime",
             "returnDate",
+            "returnTime",
             "reason",
             "status",
             "adminComment"
@@ -341,6 +398,12 @@ exports.updateExeat = async (req, res) => {
         if (body.status !== undefined && !["pending", "approved", "rejected"].includes(body.status)) {
             return res.status(400).json({ message: "Invalid status value" });
         }
+        if (
+            (body.departureTime !== undefined && !timePattern.test(body.departureTime)) ||
+            (body.returnTime !== undefined && !timePattern.test(body.returnTime))
+        ) {
+            return res.status(400).json({ message: "Departure and return times must use HH:MM format" });
+        }
 
         for (const field of fields) {
             if (Object.prototype.hasOwnProperty.call(body, field)) {
@@ -363,13 +426,23 @@ exports.updateExeat = async (req, res) => {
                 exeat.departureConfirmedAt = null;
                 exeat.returnConfirmedBy = null;
                 exeat.returnConfirmedAt = null;
+                if (exeat.exeatNumber) {
+                    exeat.slipRevokedAt = new Date();
+                }
             }
         }
 
         await exeat.save();
+        let slipResult = null;
+        if (exeat.status === "approved" && body.status === "approved") {
+            slipResult = await issueApprovedSlip(exeat);
+        }
         await populateExeat(exeat);
         return res.status(200).json({
-            message: "Exeat updated successfully",
+            message: slipResult && !slipResult.emailSent
+                ? "Exeat approved and permission slip generated, but the email could not be sent."
+                : "Exeat updated successfully",
+            ...(slipResult ? { permissionSlip: slipResult } : {}),
             exeat
         });
     } catch (error) {

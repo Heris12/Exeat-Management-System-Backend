@@ -1,5 +1,6 @@
 const express = require("express");
 const {
+    verifyExeatPass,
     getApprovedExeats,
     confirmDeparture,
     confirmReturn
@@ -9,6 +10,7 @@ const { protect, requireSecurity } = require("../middleware/auth");
 const router = express.Router();
 
 router.use(protect, requireSecurity);
+router.get("/verify", verifyExeatPass);
 router.get("/exeats", getApprovedExeats);
 router.patch("/exeats/:id/departure", confirmDeparture);
 router.patch("/exeats/:id/return", confirmReturn);

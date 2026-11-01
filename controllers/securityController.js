@@ -1,7 +1,42 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const Exeat = require("../models/Exeat");
+const { getSlipStatus } = require("../services/exeatSlipService");
 
 const studentFields = "fullName email matriculationNumber department hostel";
+
+exports.verifyExeatPass = async (req, res) => {
+    const token = req.query.token;
+    if (typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) {
+        return res.status(400).json({ message: "A valid verification code is required" });
+    }
+
+    try {
+        const verificationTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+        const exeat = await Exeat.findOne({ verificationTokenHash })
+            .select("+verificationTokenHash")
+            .populate("student", "fullName matriculationNumber");
+        if (!exeat || !exeat.student) {
+            return res.status(404).json({ message: "This permission slip could not be verified" });
+        }
+
+        const status = getSlipStatus(exeat);
+        return res.status(200).json({
+            valid: status === "valid",
+            status,
+            exeatNumber: exeat.exeatNumber,
+            student: {
+                fullName: exeat.student.fullName,
+                matriculationNumber: exeat.student.matriculationNumber
+            },
+            departureDate: exeat.departureDate,
+            returnDate: exeat.returnDate
+        });
+    } catch (error) {
+        console.error("Could not verify exeat permission slip:", error.message);
+        return res.status(500).json({ message: "Unable to verify this permission slip" });
+    }
+};
 
 exports.getApprovedExeats = async (req, res) => {
     try {
@@ -35,7 +70,7 @@ exports.confirmDeparture = async (req, res) => {
                     departureConfirmedBy: req.user._id
                 }
             },
-            { new: true, runValidators: true }
+            { returnDocument: "after", runValidators: true }
         );
 
         if (!exeat) {
@@ -84,7 +119,7 @@ exports.confirmReturn = async (req, res) => {
                     returnConfirmedBy: req.user._id
                 }
             },
-            { new: true, runValidators: true }
+            { returnDocument: "after", runValidators: true }
         );
 
         if (!exeat) {
