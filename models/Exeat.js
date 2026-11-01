@@ -24,9 +24,19 @@ const exeatSchema = new mongoose.Schema({
         type: Date,
         required: [true, "Departure date is required"],
     },
+    departureTime: {
+        type: String,
+        default: "08:00",
+        match: /^([01]\d|2[0-3]):[0-5]\d$/
+    },
     returnDate: {
         type: Date,
         required: [true, "Return date is required"],
+    },
+    returnTime: {
+        type: String,
+        default: "18:00",
+        match: /^([01]\d|2[0-3]):[0-5]\d$/
     },
     reason: {
         type: String,
@@ -71,8 +81,45 @@ const exeatSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    exeatNumber: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    verificationTokenHash: {
+        type: String,
+        unique: true,
+        sparse: true,
+        select: false
+    },
+    slipDownloadTokenHash: {
+        type: String,
+        unique: true,
+        sparse: true,
+        select: false
+    },
+    slipGeneratedAt: Date,
+    slipVersion: {
+        type: Number,
+        default: 0
+    },
+    slipApprovedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+    },
+    slipRevokedAt: Date,
+    slipPdf: {
+        type: Buffer,
+        select: false
+    },
+    slipEmailSentAt: Date,
+    slipEmailError: {
+        type: String,
+        select: false
+    },
 
 }, {timestamps: true});
 
 exeatSchema.index({ student: 1, createdAt: -1 });
+exeatSchema.index({ student: 1, status: 1, slipGeneratedAt: -1 });
 module.exports = mongoose.model("Exeat", exeatSchema);

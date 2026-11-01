@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const Exeat = require("../models/Exeat");
+const { getSlipStatus, issueApprovedSlip, SLIP_VERSION } = require("../services/exeatSlipService");
+
+const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // Get all exeats
 exports.getAllExeats = async (req, res) => {
@@ -8,7 +12,10 @@ exports.getAllExeats = async (req, res) => {
         const exeats = await Exeat.find(query)
             .populate("student", "fullName email matriculationNumber department")
             .populate("reviewedBy", "fullName email");
-        res.status(200).json(exeats);
+        res.status(200).json(exeats.map((exeat) => ({
+            ...exeat.toObject(),
+            ...(exeat.exeatNumber ? { slipStatus: getSlipStatus(exeat) } : {})
+        })));
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -30,8 +37,13 @@ exports.createExeat = async (req, res) => {
         }
         const departure = new Date(departureDate);
         const returnD = new Date(returnDate);
+        const departureTime = req.body.departureTime || "08:00";
+        const returnTime = req.body.returnTime || "18:00";
         if (Number.isNaN(departure.getTime()) || Number.isNaN(returnD.getTime())) {
             return res.status(400).json({ message: "Invalid date format" });
+        }
+        if (!timePattern.test(departureTime) || !timePattern.test(returnTime)) {
+            return res.status(400).json({ message: "Departure and return times must use HH:MM format" });
         }
         if (departure >= returnD) {
             return res.status(400).json({ message: "Return date must be after departure date" });
@@ -42,7 +54,9 @@ exports.createExeat = async (req, res) => {
             destination: destination.trim(),
             hostel: req.user.hostel,
             departureDate: departure,
+            departureTime,
             returnDate: returnD,
+            returnTime,
             reason: reason.trim()
         });
         return res.status(201).json({ message: "Exeat request submitted successfully", exeat });
@@ -76,88 +90,74 @@ exports.downloadExeatSlip = async (req, res) => {
             return res.status(400).json({ message: "Invalid request ID." });
         }
 
-        const exeat = await Exeat.findById(req.params.id)
-            .populate("student", "fullName matriculationNumber department")
-            .populate("reviewedBy", "fullName");
+        const exeat = await Exeat.findOne({
+            _id: req.params.id,
+            student: req.user._id
+        }).select("+slipPdf");
         if (!exeat || !exeat.student) {
             return res.status(404).json({ message: "Exeat not found" });
         }
-        if (String(exeat.student._id) !== String(req.user._id)) {
-            return res.status(403).json({ message: "You are not allowed to download this exeat slip" });
+        if (exeat.status !== "approved" || exeat.slipRevokedAt) {
+            return res.status(409).json({ message: "This exeat permission slip is not currently valid" });
         }
-        if (exeat.status !== "approved") {
-            return res.status(409).json({ message: "An exeat slip is available only after approval" });
-        }
-
-        const PDFDocument = require("pdfkit");
-        const document = new PDFDocument({ size: "A4", margin: 56 });
-        const filename = `exeat-slip-${exeat._id}.pdf`;
-        res.set({
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `attachment; filename="${filename}"`,
-            "Cache-Control": "no-store"
-        });
-        document.on("error", (error) => {
-            console.error("Could not generate exeat slip:", error);
-            if (res.headersSent) {
-                res.destroy();
-            } else {
-                res.status(500).json({ message: "An error occurred while generating the exeat slip" });
+        if (!exeat.slipPdf?.length || exeat.slipVersion !== SLIP_VERSION) {
+            await issueApprovedSlip(exeat);
+            await exeat.populate("student", "fullName email");
+            const generatedSlip = await Exeat.findOne({
+                _id: exeat._id,
+                student: req.user._id,
+                status: "approved",
+                slipRevokedAt: { $exists: false }
+            }).select("+slipPdf");
+            if (!generatedSlip?.exeatNumber || !generatedSlip.slipPdf?.length) {
+                return res.status(503).json({
+                    message: "The permission slip could not be generated. Please try again or contact the administrator."
+                });
             }
-        });
-        document.pipe(res);
-
-        const formattedDate = (date) => new Date(date).toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "long",
-            year: "numeric",
-            timeZone: "UTC"
-        });
-        const writeField = (label, value) => {
-            document.font("Helvetica-Bold").fillColor("#1f2937").text(`${label}: `, { continued: true });
-            document.font("Helvetica").fillColor("#374151").text(String(value || "—"));
-            document.moveDown(0.7);
-        };
-
-        document.fillColor("#0057b8").font("Helvetica-Bold").fontSize(22).text("APPROVED EXEAT SLIP", {
-            align: "center"
-        });
-        document.moveDown(0.5);
-        document.fillColor("#4b5563").font("Helvetica").fontSize(10).text("Edo State University", {
-            align: "center"
-        });
-        document.moveDown(2);
-        document.fontSize(12);
-        writeField("Student", exeat.student.fullName);
-        writeField("Matriculation number", exeat.student.matriculationNumber);
-        writeField("Department", exeat.student.department);
-        writeField("Exeat type", exeat.exeatType);
-        writeField("Destination", exeat.destination);
-        writeField("Hostel", exeat.hostel);
-        writeField("Departure date", formattedDate(exeat.departureDate));
-        writeField("Return date", formattedDate(exeat.returnDate));
-        writeField("Reason", exeat.reason);
-        writeField("Status", "Approved");
-        writeField("Approved on", exeat.reviewedAt ? formattedDate(exeat.reviewedAt) : "—");
-        writeField("Approved by", exeat.reviewedBy?.fullName);
-        if (exeat.adminComment) {
-            writeField("Administrator comment", exeat.adminComment);
+            return sendSlipPdf(res, generatedSlip, req.query.inline === "true");
         }
-        document.moveDown(2);
-        document.fontSize(9).fillColor("#6b7280").text(
-            "Please present this approved slip to the appropriate university personnel when required.",
-            { align: "center" }
-        );
-        document.end();
+        return sendSlipPdf(res, exeat, req.query.inline === "true");
     } catch (error) {
         console.error("Could not download exeat slip:", error);
-        if (res.headersSent) {
-            res.destroy();
-            return;
-        }
-        return res.status(500).json({ message: "An error occurred while generating the exeat slip" });
+        return res.status(503).json({
+            message: "The permission slip could not be generated. Please try again or contact the administrator."
+        });
     }
 };
+
+exports.downloadExeatSlipByToken = async (req, res) => {
+    const token = req.query.token;
+    if (typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) {
+        return res.status(400).json({ message: "A valid download link is required" });
+    }
+
+    try {
+        const slipDownloadTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+        const exeat = await Exeat.findOne({
+            slipDownloadTokenHash,
+            status: "approved",
+            slipRevokedAt: null
+        }).select("+slipPdf");
+        if (!exeat?.slipPdf?.length || !exeat.exeatNumber) {
+            return res.status(404).json({ message: "This exeat download link is invalid or no longer available" });
+        }
+
+        return sendSlipPdf(res, exeat, false);
+    } catch (error) {
+        console.error("Could not download exeat slip from email link:", error);
+        return res.status(500).json({ message: "Unable to download this exeat slip right now" });
+    }
+};
+
+function sendSlipPdf(res, exeat, inline) {
+        res.set({
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${exeat.exeatNumber}.pdf"`,
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff"
+        });
+        return res.send(exeat.slipPdf);
+}
 
 // Update exeat status (approve/reject)
 exports.updateExeatStatus = async (req, res) => {
@@ -171,6 +171,15 @@ exports.updateExeatStatus = async (req, res) => {
             return res.status(404).json({ message: "Exeat not found" });
         }
         if (exeat.status !== "pending") {
+            if (status === "approved" && exeat.status === "approved") {
+                const permissionSlip = await issueApprovedSlip(exeat);
+                return res.status(200).json({
+                    message: permissionSlip.emailSent
+                        ? "This exeat was already approved and its permission slip is available"
+                        : "This exeat was already approved; email delivery is still unavailable",
+                    permissionSlip
+                });
+            }
             return res.status(409).json({ message: "This exeat request has already been reviewed" });
         }
         exeat.status = status;
@@ -178,8 +187,18 @@ exports.updateExeatStatus = async (req, res) => {
         exeat.reviewedBy = req.user._id;
         exeat.reviewedAt = new Date();
         await exeat.save();
+        if (status === "approved") {
+            const permissionSlip = await issueApprovedSlip(exeat);
+            return res.status(200).json({
+                message: permissionSlip.emailSent
+                    ? "Exeat request approved and permission slip emailed successfully"
+                    : "Exeat request approved and permission slip generated, but email delivery failed",
+                permissionSlip
+            });
+        }
         return res.status(200).json({ message: `Exeat request ${status} successfully`, exeat });
     } catch (error) {
+        console.error("Could not update exeat request:", error.message);
         return res.status(500).json({ message: "An error occurred while updating the exeat request" });
     }
 };
